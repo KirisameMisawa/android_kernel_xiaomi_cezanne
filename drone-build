@@ -1,0 +1,74 @@
+#!/bin/bash
+clang_path="${HOME}/proton-clang-20200606/bin/clang"
+gcc_path="${HOME}/proton-clang-20200606/bin/aarch64-linux-gnu-"
+gcc_32_path="${HOME}/proton-clang-20200606/bin/arm-linux-gnueabi-"
+
+date="`date +"%m%d%H%M"`"
+firstver="MarisaKernel"
+device1="Cezanne"
+middlever="BETA${DRONE_BUILD_NUMBER}"
+
+args="-j32 O=out \
+	ARCH=arm64 \
+	SUBARCH=arm64 "
+
+args+="CC=$clang_path \
+	CLANG_TRIPLE=aarch64-linux-gnu- \
+	CROSS_COMPILE=$gcc_path "
+
+args+="CROSS_COMPILE_ARM32=$gcc_32_path "
+
+clean(){
+	make mrproper
+	make $args mrproper
+}
+
+tg_upload(){
+    curl -s https://api.telegram.org/bot"${BOTTOKEN}"/sendDocument -F document=@"${1}" -F chat_id="${CHATID}"
+}
+
+tg_notify(){
+    curl -s https://api.telegram.org/bot"${BOTTOKEN}"/sendMessage -d parse_mode="Markdown" -d text="${1}" -d chat_id="${CHATID}"
+}
+
+log(){
+	tg_notify "LOG: ${1}"
+}
+
+terminate(){
+  log "${1}"
+  exit 1
+}
+
+
+buildCepheus(){
+	export KBUILD_BUILD_USER="Cezanne"
+	export KBUILD_BUILD_HOST="MarisaKernel"
+args+="LOCALVERSION=-${firstver}-${device1}-${middlever} "
+  clean
+	make $args cezanne_user_defconfig&&make $args
+	if [ $? -ne 0 ]; then
+    terminate "Error while building for cepheus!"
+    fi
+	mkzip_cepheus
+	tg_notify "Finish building cepheus!"
+}
+
+mkzip_cepheus(){
+	mv -f ~/src/out/arch/arm64/boot/Image-dtb ~/src/anykernel3
+	cd ~/src/anykernel3
+	zip -r "MarisaKernel-Cezanne-$middlever-$date.zip" *
+	mv -f "MarisaKernel-Cezanne-$middlever-$date.zip" ${HOME}
+	cd ${HOME}
+	log "Finish making zip for Cezanne!"
+	tg_upload "MarisaKernel-Cezanne-$middlever-$date.zip"
+	cd $source
+}
+
+tg_notify "LOG: START BUILDING!"
+git submodule init
+git submodule update
+buildCepheus
+cd /drone/src/
+buildRaphael
+log "Build finished for #${DRONE_BUILD_NUMBER} ( ${date} )."
